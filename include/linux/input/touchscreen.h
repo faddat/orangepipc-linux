@@ -9,8 +9,22 @@
 #ifndef _TOUCHSCREEN_H
 #define _TOUCHSCREEN_H
 
+#include <asm/types.h>
+
 struct input_dev;
 
-void touchscreen_parse_properties(struct input_dev *dev, bool multitouch);
+struct touchscreen_properties {
+	s32 max_x;
+	s32 max_y;
+	bool invert_x;
+	bool invert_y;
+	bool swap_x_y;
+};
+
+void touchscreen_parse_properties(struct input_dev *input, bool multitouch,
+				  struct touchscreen_properties *prop);
+
+void touchscreen_apply_prop_to_x_y(struct touchscreen_properties *prop,
+				   s16 *x, s16 *y);
 
 #endif
