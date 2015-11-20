@@ -103,8 +103,15 @@
 &i2c1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c1_pins_a>;
-	/* pull-ups and devices require AXP209 LDO3 */
-	status = "failed";
+	status = "okay";
+
+	/* Accelerometer */
+	bma250@18 {
+		compatible = "bosch,bma250";
+		reg = <0x18>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 0 IRQ_TYPE_EDGE_RISING>; /* PH0 / EINT0 */
+	};
 };
 
 &i2c2 {
@@ -228,6 +235,17 @@
 	regulator-min-microvolt = <3000000>;
 	regulator-max-microvolt = <3000000>;
 	regulator-name = "avcc";
+};
+
+&reg_ldo3 {
+	/*
+	 * We need to always power the camera sensor, otherwhise all access
+	 * to i2c1 is blocked.
+	 */
+	regulator-always-on;
+	regulator-min-microvolt = <2800000>;
+	regulator-max-microvolt = <2800000>;
+	regulator-name = "vdd-csi";
 };
 
 &reg_usb0_vbus {
