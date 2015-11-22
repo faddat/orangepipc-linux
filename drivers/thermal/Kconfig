@@ -381,6 +381,13 @@ config MTK_THERMAL
 	  Enable this option if you want to have support for thermal management
 	  controller present in Mediatek SoCs
 
+config SUN8I_THS
+	tristate "sun8i THS driver"
+	depends on MACH_SUN8I
+	depends on OF
+	help
+	  Enable this to support thermal reporting on some newer Allwinner SoCs.
+
 menu "Texas Instruments thermal drivers"
 depends on ARCH_HAS_BANDGAP || COMPILE_TEST
 depends on HAS_IOMEM
