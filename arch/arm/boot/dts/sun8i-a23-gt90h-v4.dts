@@ -80,6 +80,22 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c0_pins_a>;
 	status = "okay";
+	/*
+	 * The gsl1680 is rated at 400KHz and it will not work reliable at
+	 * 100KHz, this has been confirmed on multiple different tablets.
+	 * The gsl1680 is the only device on this bus.
+	 */
+	clock-frequency = <400000>;
+
+	gsl1680: touchscreen@40 {
+		compatible = "silead,gsl1680";
+		reg = <0x40>;
+		interrupt-parent = <&pio>;
+		interrupts = <1 5 IRQ_TYPE_EDGE_FALLING>; /* PB5 */
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_power_pin_gth90h>;
+		power-gpios = <&pio 7 1 GPIO_ACTIVE_HIGH>; /* PH1 */
+	};
 };
 
 &i2c1 {
@@ -137,6 +153,13 @@
 		allwinner,function = "gpio_in";
 		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
 		allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
+	};
+
+	ts_power_pin_gth90h: ts_power_pin@0 {
+		allwinner,pins = "PH1";
+		allwinner,function = "gpio_out";
+		allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+		allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
 	};
 };
 
