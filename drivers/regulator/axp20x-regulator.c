@@ -345,6 +345,7 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		.driver_data = axp20x,
 	};
 	int ret, i, nregulators;
+	unsigned int reg, sel;
 	u32 workmode;
 	const char *axp22x_dc1_name = axp22x_regulators[AXP22X_DCDC1].name;
 	const char *axp22x_dc5_name = axp22x_regulators[AXP22X_DCDC5].name;
@@ -359,6 +360,24 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	case AXP223_ID:
 		regulators = axp22x_regulators;
 		nregulators = AXP22X_REG_ID_MAX;
+		/*
+		 * On cold boot ldo_io# sel is 0x1f which is out of spec,
+		 * fix this up here to avoid _regulator_get_voltage returning
+		 * -EINVAL when applying constraints.
+		 */
+		for (reg = AXP22X_LDO_IO0_V_OUT;
+		     reg <= AXP22X_LDO_IO1_V_OUT; reg += 2) {
+			ret = regmap_read(axp20x->regmap, reg, &sel);
+			if (ret)
+				return ret;
+			sel &= 0x1f;
+			if (sel > 0x1a) {
+				ret = regmap_update_bits(axp20x->regmap, reg,
+							 0x1f, 0x1a);
+				if (ret)
+					return ret;
+			}
+		}
 		break;
 	default:
 		dev_err(&pdev->dev, "Unsupported AXP variant: %ld\n",
