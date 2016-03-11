@@ -421,6 +421,9 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 
 		rdev = devm_regulator_register(&pdev->dev, desc, &config);
 		if (IS_ERR(rdev)) {
+			if (PTR_ERR(rdev) == -ENODEV)
+				continue;
+
 			dev_err(&pdev->dev, "Failed to register %s\n",
 				regulators[i].name);
 
