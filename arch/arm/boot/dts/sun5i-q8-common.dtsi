@@ -93,6 +93,11 @@
 /*		pinctrl-names = "default";
 		pinctrl-0 = <&ts_wake_pin_p66>; */
 		power-gpios = <&pio 1 3 GPIO_ACTIVE_HIGH>; /* PB3 */
+		touchscreen-size-x = <480>;
+		touchscreen-size-y = <800>;
+		touchscreen-max-fingers = <5>;
+		touchscreen-inverted-x;
+		touchscreen-swapped-x-y;
 	};
 
 	pcf8563: rtc@51 {

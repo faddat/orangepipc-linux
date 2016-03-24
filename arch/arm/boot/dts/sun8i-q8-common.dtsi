@@ -79,6 +79,9 @@
 /*		pinctrl-names = "default";
 		pinctrl-0 = <&ts_wake_pin_p66>; */
 		power-gpios = <&pio 7 1 GPIO_ACTIVE_HIGH>; /* PH1 */
+		touchscreen-size-x = <800>;
+		touchscreen-size-y = <480>;
+		touchscreen-max-fingers = <5>;
 	};
 };
 
