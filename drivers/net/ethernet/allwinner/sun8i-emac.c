@@ -279,10 +279,6 @@ static void sun8i_emac_set_macaddr(struct sun8i_emac_priv *priv,
 {
 	u32 v;
 
-	if (!is_valid_ether_addr(addr)) {
-		random_ether_addr(priv->ndev->dev_addr);
-		addr = priv->ndev->dev_addr;
-	}
 	dev_info(priv->dev, "device MAC address slot %d %02x:%02x:%02x:%02x:%02x:%02x\n",
 		 index, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
 
@@ -1687,8 +1683,6 @@ static int sun8i_emac_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "ERROR: Register %s failed\n", ndev->name);
 		goto probe_err;
 	}
-
-	sun8i_emac_set_macaddr(priv, ndev->dev_addr, 0);
 
 	return 0;
 
