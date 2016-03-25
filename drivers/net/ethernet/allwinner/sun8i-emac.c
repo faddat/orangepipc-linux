@@ -676,8 +676,6 @@ static void sun8i_emac_adjust_link(struct net_device *ndev)
 	unsigned long flags;
 	int new_state = 0;
 
-	dev_dbg(priv->dev, "%s link=%x duplex=%x speed=%x\n", __func__,
-		phydev->link, phydev->duplex, phydev->speed);
 	if (!phydev)
 		return;
 
@@ -702,8 +700,6 @@ static void sun8i_emac_adjust_link(struct net_device *ndev)
 			priv->link = phydev->link;
 		}
 
-		dev_dbg(priv->dev, "%s new=%d link=%d pause=%d\n",
-			__func__, new_state, priv->link, phydev->pause);
 		if (new_state)
 			sun8i_emac_set_link_mode(priv);
 	} else if (priv->link != phydev->link) {
