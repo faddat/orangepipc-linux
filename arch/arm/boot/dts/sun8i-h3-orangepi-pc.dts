@@ -92,6 +92,16 @@
 
 &r_twi {
 	status = "okay";
+
+	vdd_cpu: regulator@65 {
+		compatible = "sy8106a";
+		reg = <0x65>;
+		regulator-min-microvolt = <1000000>;
+		regulator-max-microvolt = <1400000>;
+		regulator-ramp-delay = <200>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
 };
 
 &ehci1 {
