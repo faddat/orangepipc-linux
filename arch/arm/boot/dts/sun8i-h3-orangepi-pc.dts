@@ -90,13 +90,55 @@
 	};
 };
 
+&cpu0 {
+	clocks = <&cpu>;
+	clock-latency = <244144>; /* 8 32k periods */
+	operating-points = <
+		/* kHz	  uV */
+		1344000	1340000
+		1296000	1320000
+		1200000	1240000
+		1104000	1180000
+		1008000	1140000
+		648000	1050000
+		408000	 980000
+		>;
+	#cooling-cells = <2>;
+	cooling-min-level = <0>;
+	cooling-max-level = <6>;
+	cpu0-supply = <&vdd_cpu>;
+};
+
+&cpu_thermal {
+	cooling-maps {
+		map0 {
+			trip = <&cpu_alert0>;
+			cooling-device = <&cpu0 (-1) (-1)>;
+		};
+	};
+
+	trips {
+		cpu_alert0: cpu_alert0 {
+			temperature = <75000>;
+			hysteresis = <2000>;
+			type = "passive";
+		};
+
+		cpu_crit: cpu_crit {
+			temperature = <100000>;
+			hysteresis = <2000>;
+			type = "critical";
+		};
+	};
+};
+
 &r_twi {
 	status = "okay";
 
 	vdd_cpu: regulator@65 {
 		compatible = "sy8106a";
 		reg = <0x65>;
-		regulator-min-microvolt = <1000000>;
+		regulator-min-microvolt = <980000>;
 		regulator-max-microvolt = <1400000>;
 		regulator-ramp-delay = <200>;
 		regulator-boot-on;
