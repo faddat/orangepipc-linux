@@ -157,7 +157,9 @@ static struct regulator_ops axp20x_ops_sw = {
 static const struct regulator_linear_range axp20x_ldo4_ranges[] = {
 	REGULATOR_LINEAR_RANGE(1250000, 0x0, 0x0, 0),
 	REGULATOR_LINEAR_RANGE(1300000, 0x1, 0x8, 100000),
-	REGULATOR_LINEAR_RANGE(2500000, 0x9, 0xf, 100000),
+	REGULATOR_LINEAR_RANGE(2500000, 0x9, 0x9, 0),
+	REGULATOR_LINEAR_RANGE(2700000, 0xa, 0xb, 100000),
+	REGULATOR_LINEAR_RANGE(3000000, 0xc, 0xf, 100000),
 };
 
 static const struct regulator_desc axp20x_regulators[] = {
@@ -215,10 +217,10 @@ static const struct regulator_desc axp22x_regulators[] = {
 		 AXP22X_ELDO2_V_OUT, 0x1f, AXP22X_PWR_OUT_CTRL2, BIT(1)),
 	AXP_DESC(AXP22X, ELDO3, "eldo3", "eldoin", 700, 3300, 100,
 		 AXP22X_ELDO3_V_OUT, 0x1f, AXP22X_PWR_OUT_CTRL2, BIT(2)),
-	AXP_DESC_IO(AXP22X, LDO_IO0, "ldo_io0", "ips", 1800, 3300, 100,
+	AXP_DESC_IO(AXP22X, LDO_IO0, "ldo_io0", "ips", 700, 3300, 100,
 		    AXP22X_LDO_IO0_V_OUT, 0x1f, AXP20X_GPIO0_CTRL, 0x07,
 		    AXP22X_IO_ENABLED, AXP22X_IO_DISABLED),
-	AXP_DESC_IO(AXP22X, LDO_IO1, "ldo_io1", "ips", 1800, 3300, 100,
+	AXP_DESC_IO(AXP22X, LDO_IO1, "ldo_io1", "ips", 700, 3300, 100,
 		    AXP22X_LDO_IO1_V_OUT, 0x1f, AXP20X_GPIO1_CTRL, 0x07,
 		    AXP22X_IO_ENABLED, AXP22X_IO_DISABLED),
 	AXP_DESC_FIXED(AXP22X, RTC_LDO, "rtc_ldo", "ips", 3000),
@@ -345,6 +347,7 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		.driver_data = axp20x,
 	};
 	int ret, i, nregulators;
+	unsigned int reg, sel;
 	u32 workmode;
 	const char *axp22x_dc1_name = axp22x_regulators[AXP22X_DCDC1].name;
 	const char *axp22x_dc5_name = axp22x_regulators[AXP22X_DCDC5].name;
@@ -359,6 +362,24 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	case AXP223_ID:
 		regulators = axp22x_regulators;
 		nregulators = AXP22X_REG_ID_MAX;
+		/*
+		 * On cold boot ldo_io# sel is 0x1f which is out of spec,
+		 * fix this up here to avoid _regulator_get_voltage returning
+		 * -EINVAL when applying constraints.
+		 */
+		for (reg = AXP22X_LDO_IO0_V_OUT;
+		     reg <= AXP22X_LDO_IO1_V_OUT; reg += 2) {
+			ret = regmap_read(axp20x->regmap, reg, &sel);
+			if (ret)
+				return ret;
+			sel &= 0x1f;
+			if (sel > 0x1a) {
+				ret = regmap_update_bits(axp20x->regmap, reg,
+							 0x1f, 0x1a);
+				if (ret)
+					return ret;
+			}
+		}
 		break;
 	default:
 		dev_err(&pdev->dev, "Unsupported AXP variant: %ld\n",
@@ -402,6 +423,9 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 
 		rdev = devm_regulator_register(&pdev->dev, desc, &config);
 		if (IS_ERR(rdev)) {
+			if (PTR_ERR(rdev) == -ENODEV)
+				continue;
+
 			dev_err(&pdev->dev, "Failed to register %s\n",
 				regulators[i].name);
 

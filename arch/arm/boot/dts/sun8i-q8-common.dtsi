@@ -63,6 +63,28 @@
 	};
 };
 
+&i2c0 {
+	/*
+	 * The gsl1680 is rated at 400KHz and it will not work reliable at
+	 * 100KHz, this has been confirmed on multiple different q8 tablets.
+	 * The gsl1680 is the only device on this bus.
+	 */
+	clock-frequency = <400000>;
+
+	gsl1680: touchscreen@40 {
+		compatible = "silead,gsl1680";
+		reg = <0x40>;
+		interrupt-parent = <&pio>;
+		interrupts = <1 5 IRQ_TYPE_EDGE_FALLING>; /* PB5 */
+/*		pinctrl-names = "default";
+		pinctrl-0 = <&ts_wake_pin_p66>; */
+		power-gpios = <&pio 7 1 GPIO_ACTIVE_HIGH>; /* PH1 */
+		touchscreen-size-x = <800>;
+		touchscreen-size-y = <480>;
+		touchscreen-max-fingers = <5>;
+	};
+};
+
 &mmc0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin_q8>;
@@ -125,8 +147,6 @@
 };
 
 &reg_dc1sw {
-	regulator-min-microvolt = <3000000>;
-	regulator-max-microvolt = <3000000>;
 	regulator-name = "vcc-lcd";
 };
 
@@ -163,6 +183,14 @@
 	regulator-min-microvolt = <1500000>;
 	regulator-max-microvolt = <1500000>;
 	regulator-name = "vcc-dram";
+};
+
+&reg_ldo_io1 {
+	regulator-always-on;
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+	regulator-name = "vcc-touchscreen";
+	status = "okay";
 };
 
 &reg_rtc_ldo {

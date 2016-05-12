@@ -9,6 +9,7 @@ obj-y += clk-a10-mod1.o
 obj-y += clk-a10-pll2.o
 obj-y += clk-a10-ve.o
 obj-y += clk-a20-gmac.o
+obj-y += clk-h3-ths.o
 obj-y += clk-mod0.o
 obj-y += clk-simple-gates.o
 obj-y += clk-sun8i-bus-gates.o

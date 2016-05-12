@@ -194,6 +194,10 @@ static irqreturn_t sunxi_musb_interrupt(int irq, void *__hci)
 		musb_writeb(musb->mregs, MUSB_FADDR, 0);
 	}
 
+	/*  Ignore Vbus errors when in host only mode */
+	if (musb->port_mode == MUSB_PORT_MODE_HOST)
+		musb->int_usb &= ~MUSB_INTR_VBUSERROR;
+
 	musb->int_tx = readw(musb->mregs + SUNXI_MUSB_INTRTX);
 	if (musb->int_tx)
 		writew(musb->int_tx, musb->mregs + SUNXI_MUSB_INTRTX);

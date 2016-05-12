@@ -1,0 +1,31 @@
+* sun8i THS
+
+Required properties:
+- compatible : "allwinner,sun8i-h3-ths"
+- reg : Address range of the thermal registers and location of the calibration
+        value
+- resets : Must contain an entry for each entry in reset-names.
+           see ../reset/reset.txt for details
+- reset-names : Must include the name "ahb"
+- clocks : Must contain an entry for each entry in clock-names.
+- clock-names : Must contain "ahb" for the bus gate and "ths" for the THS
+  clock
+
+Optional properties:
+- nvmem-cells : Must contain an entry for each entry in nvmem-cell-names
+- nvmem-cell-names : Must contain "calibration" for the cell containing the
+  temperature calibration cell, if available
+
+Example:
+ths: ths@01c25000 {
+	#thermal-sensor-cells = <0>;
+	compatible = "allwinner,sun8i-h3-ths";
+	reg = <0x01c25000 0x400>;
+	interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
+	resets = <&bus_rst 136>;
+	reset-names = "ahb";
+	clocks = <&bus_gates 72>, <&ths_clk>;
+	clock-names = "ahb", "ths";
+	nvmem-cells = <&ths_calibration>;
+	nvmem-cell-names = "calibration";
+};

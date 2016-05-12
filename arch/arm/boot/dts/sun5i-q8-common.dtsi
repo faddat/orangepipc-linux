@@ -41,6 +41,7 @@
  */
 #include "sunxi-q8-common.dtsi"
 
+#include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pwm/pwm.h>
 
 / {
@@ -77,6 +78,28 @@
 };
 
 &i2c1 {
+	/*
+	 * The gsl1680 is rated at 400KHz and it will not work reliable at
+	 * 100KHz, this has been confirmed on multiple different q8 tablets.
+	 * All other devices on this bus can handle 400KHz too,
+	 */
+	clock-frequency = <400000>;
+
+	gsl1680: touchscreen@40 {
+		compatible = "silead,gsl1680";
+		reg = <0x40>;
+		interrupt-parent = <&pio>;
+		interrupts = <6 11 IRQ_TYPE_EDGE_FALLING>; /* PG11 */
+/*		pinctrl-names = "default";
+		pinctrl-0 = <&ts_wake_pin_p66>; */
+		power-gpios = <&pio 1 3 GPIO_ACTIVE_HIGH>; /* PB3 */
+		touchscreen-size-x = <480>;
+		touchscreen-size-y = <800>;
+		touchscreen-max-fingers = <5>;
+		touchscreen-inverted-x;
+		touchscreen-swapped-x-y;
+	};
+
 	pcf8563: rtc@51 {
 		compatible = "nxp,pcf8563";
 		reg = <0x51>;

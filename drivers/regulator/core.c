@@ -3911,6 +3911,12 @@ regulator_register(const struct regulator_desc *regulator_desc,
 		rdev->dev.of_node = of_node_get(config->of_node);
 	}
 
+	if (rdev->dev.of_node && !of_device_is_available(rdev->dev.of_node)) {
+		kfree(config);
+		kfree(rdev);
+		return ERR_PTR(-ENODEV);
+	}
+
 	mutex_lock(&regulator_list_mutex);
 
 	mutex_init(&rdev->mutex);
