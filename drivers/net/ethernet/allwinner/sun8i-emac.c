@@ -36,8 +36,9 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/reset.h>
-#include <linux/of_net.h>
+#include <linux/of_device.h>
 #include <linux/of_mdio.h>
+#include <linux/of_net.h>
 #include <linux/iopoll.h>
 #include <linux/regulator/consumer.h>
 
@@ -84,6 +85,12 @@
 #define SUN8I_EMAC_RX_STRIP_FCS BIT(28)
 
 #define SUN8I_COULD_BE_USED_BY_DMA BIT(31)
+
+enum emac_variant {
+	A83T_EMAC,
+	H3_EMAC,
+	A64_EMAC,
+};
 
 struct ethtool_str {
 	char name[ETH_GSTRING_LEN];
@@ -177,6 +184,7 @@ MODULE_PARM_DESC(nbdesc_rx, "Number of descriptors in the RX list");
 
 struct sun8i_emac_priv {
 	void __iomem *base;
+	void __iomem *syscon;
 	int irq;
 	struct device *dev;
 	struct net_device *ndev;
@@ -187,13 +195,16 @@ struct sun8i_emac_priv {
 	int speed;
 	int link;
 	int phy_interface;
+	enum emac_variant variant;
 	struct device_node *phy_node;
 	struct clk *ahb_clk;
-	struct clk *tx_clk;
+	struct clk *ephy_clk;
 	struct regulator *regulator;
+	struct regulator *regulator_io;
+	bool use_internal_phy;
 
-	struct reset_control *rst_phy;
 	struct reset_control *rst;
+	struct reset_control *rst_ephy;
 
 	struct dma_desc *dd_rx __aligned(4);
 	dma_addr_t dd_rx_phy __aligned(4);
@@ -715,6 +726,138 @@ static void sun8i_emac_adjust_link(struct net_device *ndev)
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
+/* H3 specific bits for EPHY */
+#define H3_EPHY_ADDR_SHIFT	20
+#define H3_EPHY_LED_POL		BIT(17) /* 1: active low, 0: active high */
+#define H3_EPHY_SHUTDOWN	BIT(16) /* 1: shutdown, 0: power up */
+#define H3_EPHY_SELECT		BIT(15) /* 1: internal PHY, 0: external PHY */
+#define H3_EPHY_DEFAULT_VALUE	0x58000
+#define H3_EPHY_DEFAULT_MASK	GENMASK(31, 15)
+
+/* H3/A64 specific bits */
+#define SC_RMII_EN		BIT(13) /* 1: enable RMII (overrides EPIT) */
+
+/* Generic system control EMAC_CLK bits */
+#define SC_ETXDC_MASK		GENMASK(2, 0)
+#define SC_ETXDC_SHIFT		10
+#define SC_ERXDC_MASK		GENMASK(4, 0)
+#define SC_ERXDC_SHIFT		5
+#define SC_EPIT			BIT(2) /* 1: RGMII, 0: MII */
+#define SC_ETCS_MASK		GENMASK(1, 0)
+#define SC_ETCS_MII		0x0
+#define SC_ETCS_EXT_GMII	0x1
+#define SC_ETCS_INT_GMII	0x2
+
+static int sun8i_emac_set_syscon_ephy(struct net_device *ndev, u32 *reg)
+{
+	struct sun8i_emac_priv *priv = netdev_priv(ndev);
+	struct device_node *node = priv->dev->of_node;
+	int ret;
+
+	*reg &= ~H3_EPHY_DEFAULT_MASK;
+	*reg |= H3_EPHY_DEFAULT_VALUE;
+
+	if (!priv->use_internal_phy)
+		return 0;
+
+	if (priv->phy_interface != PHY_INTERFACE_MODE_MII) {
+		netdev_warn(ndev,
+			    "Internal PHY requested, forcing MII mode.\n");
+		priv->phy_interface = PHY_INTERFACE_MODE_MII;
+	}
+
+	*reg |= H3_EPHY_SELECT;
+	*reg &= ~H3_EPHY_SHUTDOWN;
+
+	if (of_property_read_bool(node, "allwinner,leds-active-low"))
+		*reg |= H3_EPHY_LED_POL;
+
+	ret = of_mdio_parse_addr(priv->dev, priv->phy_node);
+	if (ret < 0)
+		return ret;
+
+	/* of_mdio_parse_addr returns a valid (0 ~ 31) PHY
+	 * address. No need to mask it again.
+	 */
+	*reg |= ret << H3_EPHY_ADDR_SHIFT;
+
+	return 0;
+}
+
+static int sun8i_emac_set_syscon(struct net_device *ndev)
+{
+	struct sun8i_emac_priv *priv = netdev_priv(ndev);
+	struct device_node *node = priv->dev->of_node;
+	int ret;
+	u32 reg, val;
+
+	reg = readl(priv->syscon);
+
+	if (priv->variant == H3_EMAC) {
+		ret = sun8i_emac_set_syscon_ephy(ndev, &reg);
+		if (ret)
+			return ret;
+	}
+
+	if (!of_property_read_u32(node, "allwinner,tx-delay", &val)) {
+		if (val <= SC_ETXDC_MASK) {
+			reg &= ~(SC_ETXDC_MASK << SC_ETXDC_SHIFT);
+			reg |= (val << SC_ETXDC_SHIFT);
+		} else {
+			netdev_warn(ndev, "invalid TX clock delay: %d\n", val);
+		}
+	}
+
+	if (!of_property_read_u32(node, "allwinner,rx-delay", &val)) {
+		if (val <= SC_ERXDC_MASK) {
+			reg &= ~(SC_ERXDC_MASK << SC_ERXDC_SHIFT);
+			reg |= (val << SC_ERXDC_SHIFT);
+		} else {
+			netdev_warn(ndev, "invalid RX clock delay: %d\n", val);
+		}
+	}
+
+	/* Clear interface mode bits */
+	reg &= ~(SC_ETCS_MASK | SC_EPIT);
+	if (priv->variant == H3_EMAC || priv->variant == A64_EMAC)
+		reg &= ~SC_RMII_EN;
+
+	switch (priv->phy_interface) {
+		case PHY_INTERFACE_MODE_MII:
+			/* default */
+			break;
+		case PHY_INTERFACE_MODE_RGMII:
+			reg |= SC_EPIT | SC_ETCS_INT_GMII;
+			break;
+		case PHY_INTERFACE_MODE_RMII:
+			if (priv->variant == H3_EMAC ||
+			    priv->variant == A64_EMAC) {
+				reg |= SC_RMII_EN | SC_ETCS_EXT_GMII;
+				break;
+			}
+			/* RMII not supported on A83T */
+		default:
+			netdev_err(ndev, "unsupported interface mode: %s",
+				   phy_modes(priv->phy_interface));
+			return -EINVAL;
+	}
+
+	writel(reg, priv->syscon);
+
+	return 0;
+}
+
+static void sun8i_emac_unset_syscon(struct net_device *ndev)
+{
+	struct sun8i_emac_priv *priv = netdev_priv(ndev);
+	u32 reg = 0;
+
+	if (priv->variant == H3_EMAC)
+		reg = H3_EPHY_DEFAULT_VALUE;
+
+	writel(reg, priv->syscon);
+}
+
 static void sun8i_emac_set_mdc(struct net_device *ndev)
 {
 	struct sun8i_emac_priv *priv = netdev_priv(ndev);
@@ -734,9 +877,6 @@ static void sun8i_emac_set_mdc(struct net_device *ndev)
 	writel(reg, priv->base + SUN8I_EMAC_MDIO_CMD);
 }
 
-#define SUN7I_GMAC_GMII_RGMII_RATE	125000000
-#define SUN7I_GMAC_MII_RATE		25000000
-
 static int sun8i_emac_init(struct net_device *ndev)
 {
 	struct sun8i_emac_priv *priv = netdev_priv(ndev);
@@ -751,67 +891,92 @@ static int sun8i_emac_init(struct net_device *ndev)
 	else
 		eth_hw_addr_random(ndev);
 
-	priv->phy_interface = of_get_phy_mode(node);
-	if (priv->phy_interface < 0) {
-		netdev_err(ndev, "PHY interface mode node unspecified\n");
-		return priv->phy_interface;
-	}
-
 	priv->phy_node = of_parse_phandle(node, "phy", 0);
 	if (!priv->phy_node) {
 		netdev_err(ndev, "no associated PHY\n");
 		return -ENODEV;
 	}
 
-	ret = clk_prepare_enable(priv->ahb_clk);
-	if (ret) {
-		netdev_err(ndev, "Could not enable ahb clock");
-		return ret;
+	priv->phy_interface = of_get_phy_mode(node);
+	if (priv->phy_interface < 0) {
+		netdev_err(ndev, "PHY interface mode node unspecified\n");
+		return priv->phy_interface;
 	}
 
-	if (priv->regulator) {
-		ret = regulator_enable(priv->regulator);
-		if (ret)
-			goto err_disable_ahb_clk;
+	/* Set interface mode (and configure internal PHY on H3) */
+	ret = sun8i_emac_set_syscon(ndev);
+	if (ret)
+		return ret;
+
+	ret = clk_prepare_enable(priv->ahb_clk);
+	if (ret) {
+		netdev_err(ndev, "Could not enable ahb clock\n");
+		goto err_clk;
 	}
 
 	if (priv->rst) {
 		ret = reset_control_deassert(priv->rst);
 		if (ret) {
 			netdev_err(ndev, "Could not deassert reset\n");
-			goto err_regulator;
+			goto err_reset;
 		}
+	}
+
+	if (priv->ephy_clk) {
+		ret = clk_prepare_enable(priv->ephy_clk);
+		if (ret) {
+			netdev_err(ndev, "Could not enable EPHY clock\n");
+			goto err_ephy_clk;
+		}
+	}
+
+	if (priv->rst_ephy) {
+		ret = reset_control_deassert(priv->rst_ephy);
+		if (ret) {
+			netdev_err(ndev, "Could not deassert EPHY reset\n");
+			goto err_ephy_reset;
+		}
+	}
+
+	if (priv->regulator) {
+		ret = regulator_enable(priv->regulator);
+		if (ret)
+			goto err_regulator;
+	}
+
+	if (priv->regulator_io) {
+		ret = regulator_enable(priv->regulator_io);
+		if (ret)
+			goto err_regulator_io;
 	}
 
 	sun8i_emac_set_mdc(ndev);
 
-	/* The GMAC TX clock lines are configured by setting the clock
-	 * rate, which then uses the auto-reparenting feature of the
-	 * clock driver, and enabling/disabling the clock.
-	 */
-	if (priv->phy_interface == PHY_INTERFACE_MODE_RGMII) {
-		clk_set_rate(priv->tx_clk, SUN7I_GMAC_GMII_RGMII_RATE);
-		clk_prepare_enable(priv->tx_clk);
-	} else {
-		clk_set_rate(priv->tx_clk, SUN7I_GMAC_MII_RATE);
-	}
-
 	ret = sun8i_emac_mdio_register(ndev);
 	if (ret)
-		goto err_disable_tx_clk;
+		goto err_mdio_register;
 
 	return 0;
 
-err_disable_tx_clk:
-	if (priv->phy_interface == PHY_INTERFACE_MODE_RGMII)
-		clk_disable_unprepare(priv->tx_clk);
-	if (priv->rst)
-		reset_control_assert(priv->rst);
-err_regulator:
+err_mdio_register:
+	if (priv->regulator_io)
+		regulator_disable(priv->regulator_io);
+err_regulator_io:
 	if (priv->regulator)
 		regulator_disable(priv->regulator);
-err_disable_ahb_clk:
+err_regulator:
+	if (priv->rst_ephy)
+		reset_control_assert(priv->rst_ephy);
+err_ephy_reset:
+	if (priv->ephy_clk)
+		clk_disable_unprepare(priv->ephy_clk);
+err_ephy_clk:
+	if (priv->rst)
+		reset_control_assert(priv->rst);
+err_reset:
 	clk_disable_unprepare(priv->ahb_clk);
+err_clk:
+	sun8i_emac_unset_syscon(ndev);
 	return ret;
 }
 
@@ -821,16 +986,24 @@ static void sun8i_emac_uninit(struct net_device *ndev)
 
 	mdiobus_unregister(priv->mdio);
 
-	if (priv->phy_interface == PHY_INTERFACE_MODE_RGMII)
-		clk_disable_unprepare(priv->tx_clk);
-
-	if (priv->rst)
-		reset_control_assert(priv->rst);
+	if (priv->regulator_io)
+		regulator_disable(priv->regulator_io);
 
 	if (priv->regulator)
 		regulator_disable(priv->regulator);
 
+	if (priv->rst_ephy)
+		reset_control_assert(priv->rst_ephy);
+
+	if (priv->ephy_clk)
+		clk_disable_unprepare(priv->ephy_clk);
+
+	if (priv->rst)
+		reset_control_assert(priv->rst);
+
 	clk_disable_unprepare(priv->ahb_clk);
+
+	sun8i_emac_unset_syscon(ndev);
 }
 
 static int sun8i_emac_mdio_probe(struct net_device *ndev)
@@ -1582,6 +1755,7 @@ static irqreturn_t sun8i_emac_dma_interrupt(int irq, void *dev_id)
 static int sun8i_emac_probe(struct platform_device *pdev)
 {
 	struct resource *res;
+	struct device_node *np = pdev->dev.of_node;
 	struct sun8i_emac_priv *priv;
 	struct net_device *ndev;
 	int ret;
@@ -1594,11 +1768,22 @@ static int sun8i_emac_probe(struct platform_device *pdev)
 	priv = netdev_priv(ndev);
 	platform_set_drvdata(pdev, ndev);
 
+	priv->variant = (enum emac_variant)of_device_get_match_data(&pdev->dev);
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	priv->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(priv->base)) {
 		ret = PTR_ERR(priv->base);
 		dev_err(&pdev->dev, "Cannot request MMIO: %d\n", ret);
+		goto probe_err;
+	}
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "syscon");
+	priv->syscon = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(priv->syscon)) {
+		ret = PTR_ERR(priv->syscon);
+		dev_err(&pdev->dev,
+			"Cannot map system control registers: %d\n", ret);
 		goto probe_err;
 	}
 
@@ -1623,18 +1808,38 @@ static int sun8i_emac_probe(struct platform_device *pdev)
 		goto probe_err;
 	}
 
-	priv->tx_clk = devm_clk_get(&pdev->dev, "tx");
-	if (IS_ERR(priv->tx_clk)) {
-		ret = PTR_ERR(priv->tx_clk);
-		dev_err(&pdev->dev, "Cannot get TX clock err=%d\n", ret);
-		goto probe_err;
-	}
-
 	priv->rst = devm_reset_control_get_optional(&pdev->dev, "ahb");
 	if (IS_ERR(priv->rst)) {
 		ret = PTR_ERR(priv->rst);
+		if (ret == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
 		dev_info(&pdev->dev, "no mac reset control found %d\n", ret);
 		priv->rst = NULL;
+	}
+
+	if (priv->variant == H3_EMAC)
+		priv->use_internal_phy =
+			of_property_read_bool(np, "allwinner,use-internal-phy");
+
+	if (priv->use_internal_phy) {
+		priv->ephy_clk = devm_clk_get(&pdev->dev, "ephy");
+		if (IS_ERR(priv->ephy_clk)) {
+			ret = PTR_ERR(priv->ephy_clk);
+			dev_err(&pdev->dev, "Cannot get EPHY clock err=%d\n",
+				ret);
+			goto probe_err;
+		}
+
+		priv->rst_ephy = devm_reset_control_get_optional(&pdev->dev,
+								 "ephy");
+		if (IS_ERR(priv->rst_ephy)) {
+			ret = PTR_ERR(priv->rst_ephy);
+			if (ret == -EPROBE_DEFER)
+				return -EPROBE_DEFER;
+			dev_info(&pdev->dev,
+				 "no EPHY reset control found %d\n", ret);
+			priv->rst_ephy = NULL;
+		}
 	}
 
 	/* Optional regulator for PHY */
@@ -1642,8 +1847,17 @@ static int sun8i_emac_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->regulator)) {
 		if (PTR_ERR(priv->regulator) == -EPROBE_DEFER)
 			return -EPROBE_DEFER;
-		dev_dbg(priv->dev, "no regulator found\n");
+		dev_dbg(priv->dev, "no PHY regulator found\n");
 		priv->regulator = NULL;
+	}
+
+	/* Optional regulator for PHY I/O */
+	priv->regulator_io = devm_regulator_get_optional(priv->dev, "phy_io");
+	if (IS_ERR(priv->regulator_io)) {
+		if (PTR_ERR(priv->regulator_io) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		dev_dbg(priv->dev, "no PHY I/O regulator found\n");
+		priv->regulator_io = NULL;
 	}
 
 	spin_lock_init(&priv->lock);
@@ -1699,7 +1913,9 @@ static int sun8i_emac_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id sun8i_emac_of_match_table[] = {
-	{ .compatible = "allwinner,sun8i-h3-emac" },
+	{ .compatible = "allwinner,sun8i-a83t-emac", .data = (void *)A83T_EMAC },
+	{ .compatible = "allwinner,sun8i-h3-emac", .data = (void *)H3_EMAC },
+	{ .compatible = "allwinner,sun50i-a64-emac", .data = (void *)A64_EMAC },
 	{}
 };
 MODULE_DEVICE_TABLE(of, sun8i_emac_of_match_table);
