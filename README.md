@@ -1,3 +1,12 @@
+## Linux Kernel for Orange Pi PC.
+
+- Currently even with torvalds/linux and includes Montjoie's ethernet patches.  If there are patches that I'm missing, please kindly file an isssue, or better still, a pull request.-
+- This repository is my CURATION ONLY.  Credit goes to the brave coders of C who came before me.  
+- I've included a few different .config settings files, which you can see in the / of the repo.  the one currently stored as .config is known-working.  
+- My next project for this platform is a reliable u-boot + kernel + Arch Linux = .img file builder.  
+- If you need a hand, I'm around.  faddat@gmail.com
+
+
         Linux kernel release 4.x <http://kernel.org/>
 
 These are the release notes for Linux version 4.  Read them carefully,
