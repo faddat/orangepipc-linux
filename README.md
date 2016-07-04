@@ -5,6 +5,12 @@
 - I've included a few different .config settings files, which you can see in the / of the repo.  the one currently stored as .config is known-working.  
 - My next project for this platform is a reliable u-boot + kernel + Arch Linux = .img file builder.  
 - If you need a hand, I'm around.  faddat@gmail.com
+- Build directions for the kernel:  
+
+```
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- 
+```
+That will build the kernel for you with the settings I specified in the .config file that I know to be working.  
 
 
         Linux kernel release 4.x <http://kernel.org/>
