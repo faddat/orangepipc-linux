@@ -245,6 +245,7 @@ endif
 header-y += hw_breakpoint.h
 header-y += l2tp.h
 header-y += libc-compat.h
+header-y += lirc.h
 header-y += limits.h
 header-y += llc.h
 header-y += loop.h
@@ -454,6 +455,7 @@ header-y += virtio_scsi.h
 header-y += virtio_types.h
 header-y += vm_sockets.h
 header-y += vt.h
+header-y += vtpm_proxy.h
 header-y += wait.h
 header-y += wanrouter.h
 header-y += watchdog.h
